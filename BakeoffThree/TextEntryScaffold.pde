@@ -8,7 +8,8 @@ final int DPIofYourDeviceScreen = 250;
 // Do not change the following variables
 String[] phrases;
 String[] suggestions;
-int totalTrialNum = 3 + (int)random(3);
+// int totalTrialNum = 3 + (int)random(3);
+int totalTrialNum = 2;
 int currTrialNum = 0;
 float startTime = 0;
 float finishTime = 0;
@@ -38,8 +39,8 @@ float cursorWidth;
 
 String alphabet   = "abcdefghijklmnopqrstuvwxyz";
 int    numLetters = 26;
-int    numSlots   = 6;                        // letters visible around ring
-float  slotAngle  = TWO_PI / numSlots;        // 60° per slot
+int    numSlots   = 10;                        // letters visible around ring
+float  slotAngle  = TWO_PI / numSlots;        // 45° per slot
 
 float dialAngle       = 0;   // accumulated rotation (unbounded float)
 float targetDialAngle = 0;   // snapped-to-nearest-letter target
