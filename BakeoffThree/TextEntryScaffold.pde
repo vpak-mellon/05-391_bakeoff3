@@ -8,7 +8,6 @@ final int DPIofYourDeviceScreen = 250;
 // Do not change the following variables
 String[] phrases;
 String[] suggestions;
-// int totalTrialNum = 3 + (int)random(3);
 int totalTrialNum = 2;
 int currTrialNum = 0;
 float startTime = 0;
@@ -25,42 +24,41 @@ PImage mouseCursor;
 float cursorHeight;
 float cursorWidth;
 
-// ── Rotary Dial design ───────────────────────────────────────────────────────
-//
-//  The disc is a spinning ring with 6 letter slots spaced 60° apart.
-//  All 26 letters wrap around continuously — spinning clockwise advances
-//  through the alphabet. Going from A to Z takes ~4.3 full rotations.
-//
-//  Gestures:
-//    Drag on ring  → rotate disc, current top letter shown large in centre
-//    Tap ring      → type the current top letter
-//    Tap centre    → space
-//    Hold centre   → backspace (red ring fills up in 500 ms)
+// ── Arc Dial design ──────────────────────────────────────────────────────────
+//  Only the top arc of a large imaginary disc is visible.
+//  The selected letter sits at 12 o'clock, shown huge in the centre.
+//  Adjacent letters fan out left/right along the arc, shrinking with distance.
+//  Drag left/right on the arc to spin. Tap the arc (small drag) to type.
+//  Space button: left side of watch face
+//  Backspace button: right side of watch face
 
 String alphabet   = "abcdefghijklmnopqrstuvwxyz";
 int    numLetters = 26;
-int    numSlots   = 10;                        // letters visible around ring
-float  slotAngle  = TWO_PI / numSlots;        // 45° per slot
 
-float dialAngle       = 0;   // accumulated rotation (unbounded float)
-float targetDialAngle = 0;   // snapped-to-nearest-letter target
-float prevMouseAngle  = 0;   // previous frame's mouse angle for delta
+// The imaginary disc center is well below the watch center so only the top
+// arc peeks into view.
+float discR;       // radius of the imaginary disc — set in setup
+float discCY;      // Y of the disc center (below watch center)
+
+// Rotation state (in letter-index units × slotAngle = radians)
+float  slotAngle  = radians(22);  // degrees between adjacent letters on the arc
+float  dialAngle  = 0;            // accumulated angle (unbounded)
+float  targetDialAngle = 0;
+boolean snapping  = false;
+
+// Drag state
+float   prevMouseX    = 0;
 boolean dragging      = false;
-float   totalDragAngle = 0;  // total absolute rotation this gesture
-float   pressStartDist = 0;  // centre-distance where press began
+float   totalDragPx   = 0;
 
-// Hold-for-backspace
+// Backspace hold
 float   holdStartTime = 0;
 boolean holdActive    = false;
 boolean backspaceUsed = false;
-final float HOLD_MS   = 500;
+final float HOLD_MS   = 450;
 
-// Snap animation
-boolean snapping = false;
-
-// Geometry (set in setup)
-float discRadius;
-float centerRadius;
+// Side-button geometry (set in setup)
+float sideBtnW, sideBtnH, sideBtnY;
 
 PFont fontHuge, fontLarge, fontMed, fontSmall;
 
@@ -73,8 +71,8 @@ void setup() {
   orientation(LANDSCAPE);
   size(800, 800);
 
-  fontHuge  = createFont("Arial", 52);
-  fontLarge = createFont("Arial", 28);
+  fontHuge  = createFont("Arial Bold", 110);
+  fontLarge = createFont("Arial", 36);
   fontMed   = createFont("Arial", 20);
   fontSmall = createFont("Arial", 13);
 
@@ -84,8 +82,27 @@ void setup() {
   cursorHeight = DPIofYourDeviceScreen * (400.0 / 250.0);
   cursorWidth  = cursorHeight * 0.6;
 
-  discRadius   = sizeOfInputArea * 0.44;  // ~110 px
-  centerRadius = sizeOfInputArea * 0.165; // ~41 px
+  // Disc is large; its center sits above the watch face so only the bottom arc shows
+  discR  = sizeOfInputArea * 1.4;
+  discCY = height / 2.0 - discR * 0.72;
+
+  // Side buttons: vertically centered in the watch face, flanking the letter
+  sideBtnW = sizeOfInputArea * 0.26;
+  sideBtnH = sizeOfInputArea * 0.38;
+  sideBtnY = height / 2.0 - sideBtnH / 2.0 - sizeOfInputArea * 0.04;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+int topLetterIndex() {
+  int idx = ((int) round(dialAngle / slotAngle)) % numLetters;
+  if (idx < 0) idx += numLetters;
+  return idx;
+}
+
+// Returns the (x, y) of a point on the imaginary disc at angle a
+float[] discPoint(float a) {
+  float cx = width / 2.0;
+  return new float[]{ cx + discR * sin(a), discCY - discR * cos(a) };
 }
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
@@ -93,54 +110,44 @@ void draw() {
   background(225);
   drawWatch();
 
-  // Dark watch face (the 1″ input area)
+  // Watch face background
   fill(15, 18, 28);
   rect(width/2 - sizeOfInputArea/2, height/2 - sizeOfInputArea/2,
        sizeOfInputArea, sizeOfInputArea);
 
-  // Animate snap-to-letter when not dragging
+  // Snap animation
   if (!dragging && snapping) {
-    dialAngle += (targetDialAngle - dialAngle) * 0.22;
+    dialAngle += (targetDialAngle - dialAngle) * 0.20;
     if (abs(targetDialAngle - dialAngle) < 0.001) {
       dialAngle = targetDialAngle;
       snapping  = false;
     }
   }
 
-  // Hold-for-backspace: fire once ring is full
+  // Backspace hold trigger
   if (holdActive && !backspaceUsed && millis() - holdStartTime >= HOLD_MS) {
     if (currentTyped.length() > 0)
       currentTyped = currentTyped.substring(0, currentTyped.length() - 1);
     backspaceUsed = true;
   }
 
-  // ── Finished ──
   if (finishTime != 0) {
-    fill(60);
-    textFont(fontLarge);
-    textAlign(CENTER);
+    fill(60); textFont(fontLarge); textAlign(CENTER);
     text("Finished!", width/2, 220);
-    cursor(ARROW);
-    return;
+    cursor(ARROW); return;
   }
 
-  // ── Pre-start ──
   if (startTime == 0 && !mousePressed) {
-    fill(70);
-    textFont(fontMed);
-    textAlign(CENTER);
+    fill(70); textFont(fontMed); textAlign(CENTER);
     text("Tap anywhere to begin", width/2, 220);
   }
-  if (startTime == 0 && mousePressed) {
-    nextTrial();
-  }
+  if (startTime == 0 && mousePressed) nextTrial();
 
-  // ── Active trials ──
   if (startTime != 0) {
     drawTextArea();
-    drawDial();
+    drawSideButtons();
+    drawArc();
     drawNextButton();
-    drawHints();
   }
 
   image(mouseCursor,
@@ -149,19 +156,15 @@ void draw() {
         cursorWidth, cursorHeight);
 }
 
-// ── Text display (outside watch) ──────────────────────────────────────────────
+// ── Text area (above watch) ───────────────────────────────────────────────────
 void drawTextArea() {
   float topY = height/2 - sizeOfInputArea/2;
   float lx   = 20;
 
-  textFont(fontSmall);
-  textAlign(LEFT);
-  fill(110);
+  textFont(fontSmall); textAlign(LEFT); fill(110);
   text("Phrase " + (currTrialNum + 1) + " of " + totalTrialNum, lx, topY - 78);
 
-  // Target phrase with per-character colour feedback
-  fill(80);
-  textFont(fontMed);
+  fill(80); textFont(fontMed);
   text("Target:", lx, topY - 50);
   float tx = lx + 90;
   for (int i = 0; i < currentPhrase.length(); i++) {
@@ -174,204 +177,178 @@ void drawTextArea() {
     tx += textWidth("" + exp);
   }
 
-  fill(30);
-  textFont(fontMed);
+  fill(30); textFont(fontMed);
   text("Typed:  " + currentTyped + "|", lx, topY - 18);
 }
 
-// ── Rotary dial (inside watch) ────────────────────────────────────────────────
-//
-//  Letter layout at any moment (6 o'clock = bottom, 12 o'clock = top):
-//
-//          [top  → current letter, amber]
-//       [upper-L]            [upper-R]
-//     [lower-L]                 [lower-R]
-//              [bottom]
-//
-//  Rotating clockwise advances the alphabet (A→B→…→Z).
-//  With 6 slots at 60° each, all 26 letters span ≈4.3 full rotations.
+// ── Side buttons (inside watch face) ─────────────────────────────────────────
+void drawSideButtons() {
+  float watchL = width/2 - sizeOfInputArea/2;
+  float watchR = width/2 + sizeOfInputArea/2;
 
-int topLetterIndex() {
-  // Clockwise drag = increasing dialAngle = advancing alphabet
-  int idx = ((int) round(dialAngle / slotAngle)) % numLetters;
-  if (idx < 0) idx += numLetters;
-  return idx;
+  // Backspace — left
+  boolean bsHeld = holdActive && !backspaceUsed;
+  float   bsProg = bsHeld ? constrain((millis() - holdStartTime) / HOLD_MS, 0, 1) : 0;
+  fill(bsHeld ? lerpColor(color(50, 80, 180), color(210, 45, 45), bsProg) : color(50, 80, 180));
+  rect(watchL, sideBtnY, sideBtnW, sideBtnH, 0, 8, 8, 0);
+  fill(255); textFont(fontSmall); textAlign(CENTER);
+  text("⌫", watchL + sideBtnW / 2, sideBtnY + sideBtnH / 2 + 5);
+
+  // Space — right
+  fill(color(40, 140, 90));
+  rect(watchR - sideBtnW, sideBtnY, sideBtnW, sideBtnH, 8, 0, 0, 8);
+  fill(255); textFont(fontSmall); textAlign(CENTER);
+  text("SPC", watchR - sideBtnW / 2, sideBtnY + sideBtnH / 2 + 5);
 }
 
-void drawDial() {
+// ── Arc of letters ────────────────────────────────────────────────────────────
+void drawArc() {
   float cx    = width / 2.0;
   float cy    = height / 2.0;
   int   topIdx = topLetterIndex();
 
-  // ── Ring segments (6 slots, evenly distributed 360°) ──
-  int half = numSlots / 2; // 3
-  for (int k = -half; k < half; k++) {
-    float screenAngle = -HALF_PI + k * slotAngle;
-    float segStart    = screenAngle - slotAngle / 2;
-    float segEnd      = screenAngle + slotAngle / 2;
+  // How many neighbours to show on each side
+  int sideCount = 2; // total visible = 2*sideCount+1 = 5
 
-    // Letter that maps to this slot
-    int letterIdx = ((topIdx + k) % numLetters + numLetters) % numLetters;
-    boolean isTop = (k == 0);
-
-    // Fade letters away from top
-    float alpha = map(abs(k), 0, half, 255, 55);
-
-    // Segment fill
-    if (isTop) fill(255, 185, 30);
-    else       fill(38, 62, 128, alpha);
-
-    arc(cx, cy, discRadius * 2, discRadius * 2, segStart, segEnd, PIE);
-
-    // Divider
-    stroke(15, 18, 28);
-    strokeWeight(1.5);
-    line(cx, cy,
-         cx + cos(segStart) * discRadius,
-         cy + sin(segStart) * discRadius);
-    noStroke();
-
-    // Letter label on ring
-    float labelR = (discRadius + centerRadius) * 0.57;
-    float lx = cx + cos(screenAngle) * labelR;
-    float ly = cy + sin(screenAngle) * labelR;
-
-    textFont(fontSmall);
-    textAlign(CENTER);
-    fill(isTop ? color(20) : color(220, alpha));
-    text(("" + alphabet.charAt(letterIdx)).toUpperCase(), lx, ly + 5);
+  // Draw neighbours first (back to front so centre is on top)
+  for (int pass = sideCount; pass >= 0; pass--) {
+    for (int side = (pass == 0 ? 0 : -1); side <= 1; side += (pass == 0 ? 1 : 2)) {
+      int k = pass * side;
+      drawLetterOnArc(topIdx, k, sideCount);
+    }
   }
 
-  // ── Centre hole ──
-  fill(15, 18, 28);
-  ellipse(cx, cy, centerRadius * 2, centerRadius * 2);
-
-  // Hold-for-backspace progress arc (drawn around edge of centre hole)
-  if (holdActive && !backspaceUsed) {
-    float t = constrain((millis() - holdStartTime) / HOLD_MS, 0, 1);
-    noFill();
-    stroke(220, 55, 55);
-    strokeWeight(5);
-    arc(cx, cy, centerRadius * 2 + 14, centerRadius * 2 + 14,
-        -HALF_PI, -HALF_PI + TWO_PI * t);
-    noStroke();
-    // Re-fill centre so arc doesn't bleed through
-    fill(15, 18, 28);
-    ellipse(cx, cy, centerRadius * 2 - 2, centerRadius * 2 - 2);
-  }
-
-  // ── Current letter large in centre ──
+  // Selected letter fills the centre of the watch face, huge
   fill(255, 185, 30);
   textFont(fontHuge);
   textAlign(CENTER);
-  text(("" + alphabet.charAt(topIdx)).toUpperCase(), cx, cy + 18);
-
-  // ── Fixed pointer at 12 o'clock (outside the ring, anchored to watch face) ──
-  fill(210, 45, 45);
-  triangle(cx - 10, cy - discRadius - 3,
-           cx + 10, cy - discRadius - 3,
-           cx,      cy - discRadius + 16);
-
-  // ── Subtle spin-direction arrows below the disc ──
-  fill(120);
-  textFont(fontSmall);
-  textAlign(CENTER);
-  text("\u2190 spin \u2192", cx, cy + discRadius + 15);
+  char sel = alphabet.charAt(topIdx);
+  // Vertically: sit in upper-centre of watch
+  text(("" + sel).toUpperCase(), cx, cy + 28);
 }
 
-// ── NEXT button (outside the 1″ area) ────────────────────────────────────────
+void drawLetterOnArc(int topIdx, int k, int sideCount) {
+  float cx    = width / 2.0;
+
+  // k=0 is centre, ±1, ±2 are neighbours
+  // Angle offset from 12 o'clock
+  float angleOffset = k * slotAngle - (dialAngle - round(dialAngle / slotAngle) * slotAngle);
+  // Point on arc
+  float[] pt = discPoint(angleOffset);
+  float px = pt[0];
+  float py = pt[1];
+
+  if (k == 0) return; // centre letter drawn separately as huge text
+
+  // Size + alpha fade by distance
+  float t     = (float) abs(k) / (sideCount + 0.5);
+  float fsize = lerp(28, 13, t);
+  float alpha = lerp(220, 60, t);
+
+  int letterIdx = ((topIdx + k) % numLetters + numLetters) % numLetters;
+  char ch = alphabet.charAt(letterIdx);
+
+  // Small rounded pill background
+  float pw = fsize * 1.5;
+  float ph = fsize * 1.6;
+  fill(38, 62, 128, alpha * 0.8);
+  rect(px - pw/2, py - ph/2, pw, ph, 6);
+
+  // Letter
+  textFont(createFont("Arial", fsize));
+  textAlign(CENTER);
+  fill(200, alpha);
+  text(("" + ch).toUpperCase(), px, py + fsize * 0.35);
+}
+
+// ── NEXT button ───────────────────────────────────────────────────────────────
 void drawNextButton() {
   fill(45, 155, 75);
   rect(620, 640, 160, 55, 8);
-  fill(255);
-  textFont(fontMed);
-  textAlign(CENTER);
+  fill(255); textFont(fontMed); textAlign(CENTER);
   text("NEXT >", 700, 677);
 }
 
-void drawHints() {
-  float by = height/2 + sizeOfInputArea/2 + 16;
-  fill(130);
-  textFont(fontSmall);
-  textAlign(CENTER);
-  text("tap ring = type letter   |   tap centre = space   |   hold centre = backspace", width/2, by);
+// ── Side button hit test ──────────────────────────────────────────────────────
+boolean inBackspace(float x, float y) {
+  float watchL = width/2 - sizeOfInputArea/2;
+  return x >= watchL && x <= watchL + sideBtnW &&
+         y >= sideBtnY && y <= sideBtnY + sideBtnH;
 }
 
-// ── Input handling ────────────────────────────────────────────────────────────
+boolean inSpace(float x, float y) {
+  float watchR = width/2 + sizeOfInputArea/2;
+  return x >= watchR - sideBtnW && x <= watchR &&
+         y >= sideBtnY && y <= sideBtnY + sideBtnH;
+}
+
+boolean inWatchFace(float x, float y) {
+  return x >= width/2 - sizeOfInputArea/2 && x <= width/2 + sizeOfInputArea/2 &&
+         y >= height/2 - sizeOfInputArea/2 && y <= height/2 + sizeOfInputArea/2;
+}
+
+// ── Input ─────────────────────────────────────────────────────────────────────
 void mousePressed() {
   if (startTime == 0) return;
 
-  // NEXT button
   if (mouseX >= 620 && mouseX <= 780 && mouseY >= 640 && mouseY <= 695) {
-    nextTrial();
+    nextTrial(); return;
+  }
+
+  // Space button
+  if (inSpace(mouseX, mouseY)) {
+    currentTyped += " "; return;
+  }
+
+  // Backspace button — start hold
+  if (inBackspace(mouseX, mouseY)) {
+    holdActive    = true;
+    backspaceUsed = false;
+    holdStartTime = millis();
+    prevMouseX    = mouseX;
+    dragging      = false;
+    totalDragPx   = 0;
     return;
   }
 
-  float cx = width / 2.0;
-  float cy = height / 2.0;
-  pressStartDist = dist(mouseX, mouseY, cx, cy);
-
-  if (pressStartDist <= discRadius) {
-    prevMouseAngle = atan2(mouseY - cy, mouseX - cx);
-    dragging       = true;
-    totalDragAngle = 0;
-    snapping       = false;
-
-    // Start hold timer if press is on the centre
-    if (pressStartDist <= centerRadius) {
-      holdActive    = true;
-      backspaceUsed = false;
-      holdStartTime = millis();
-    } else {
-      holdActive = false;
-    }
+  // Arc area — start drag
+  if (inWatchFace(mouseX, mouseY)) {
+    prevMouseX  = mouseX;
+    dragging    = true;
+    totalDragPx = 0;
+    holdActive  = false;
+    snapping    = false;
   }
 }
 
 void mouseDragged() {
+  if (inBackspace(mouseX, mouseY) && holdActive) return; // let hold run
+
+  // Cancel hold if user moves away
+  if (holdActive && !inBackspace(mouseX, mouseY)) holdActive = false;
+
   if (!dragging) return;
 
-  // Any drag cancels the hold
-  holdActive = false;
-
-  float cx  = width / 2.0;
-  float cy  = height / 2.0;
-  float cur = atan2(mouseY - cy, mouseX - cx);
-  float delta = cur - prevMouseAngle;
-
-  // Clamp wrap-around at ±π
-  if (delta >  PI) delta -= TWO_PI;
-  if (delta < -PI) delta += TWO_PI;
-
-  dialAngle      -= delta;   // anticlockwise = advancing alphabet
-  totalDragAngle += abs(delta);
-  prevMouseAngle  = cur;
+  float dx = mouseX - prevMouseX;
+  // Drag left → advance alphabet (anticlockwise), drag right → go back
+  float sensitivity = 0.012;
+  dialAngle      -= dx * sensitivity;
+  totalDragPx    += abs(dx);
+  prevMouseX      = mouseX;
 }
 
 void mouseReleased() {
-  if (!dragging) return;
-  dragging = false;
-
-  boolean wasHold = holdActive;
   holdActive = false;
 
-  // If backspace already fired from hold, just snap and exit
-  if (backspaceUsed) {
-    backspaceUsed = false;
-    snapDial();
-    return;
+  if (backspaceUsed) { backspaceUsed = false; snapDial(); return; }
+
+  if (dragging && totalDragPx < 8) {
+    // Tap on arc → type current letter
+    currentTyped += alphabet.charAt(topLetterIndex());
   }
 
-  if (totalDragAngle < 0.2) {
-    // Tap gesture — commit an action
-    if (pressStartDist <= centerRadius) {
-      currentTyped += " ";               // centre tap → space
-    } else {
-      currentTyped += alphabet.charAt(topLetterIndex()); // ring tap → type top letter
-    }
-  }
-
-  snapDial(); // always snap to clean letter position after gesture
+  dragging = false;
+  snapDial();
 }
 
 void snapDial() {
