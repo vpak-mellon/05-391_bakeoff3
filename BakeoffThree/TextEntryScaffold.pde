@@ -49,7 +49,7 @@ float uSeg3; // bottom-right corner arc
 float uSeg4; // right arm straight
 float uLen;  // total
 
-PFont fontHuge, fontLarge, fontMed, fontSmall;
+PFont fontHuge, fontLarge, fontMed, fontSmall, fontScaffold;
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 void setup() {
@@ -59,10 +59,12 @@ void setup() {
   orientation(LANDSCAPE);
   size(800, 800);
 
-  fontHuge  = createFont("Arial Bold", 90);
-  fontLarge = createFont("Arial", 26);
-  fontMed   = createFont("Arial", 17);
-  fontSmall = createFont("Arial", 11);
+  fontScaffold = createFont("Arial", 24);
+  fontHuge     = createFont("Arial Bold", 90);
+  fontLarge    = createFont("Arial", 26);
+  fontMed      = createFont("Arial", 17);
+  fontSmall    = createFont("Arial", 11);
+  textFont(fontScaffold);
 
   noStroke(); noCursor();
   mouseCursor  = loadImage("finger.png");
@@ -71,7 +73,7 @@ void setup() {
 
   float cx = width / 2.0, cy = height / 2.0, half = sizeOfInputArea / 2.0;
 
-  uSW      = sizeOfInputArea * 0.115;  // ~29 px
+  uSW      = sizeOfInputArea * 0.16;   // ~40 px
   uCornerR = uSW * 1.4;               // ~40 px — controls inner corner curve
 
   uLX   = cx - half + uSW * 0.5;
@@ -254,28 +256,15 @@ void draw() {
         cursorWidth, cursorHeight);
 }
 
-// ── Text area (above watch) ───────────────────────────────────────────────────
+// ── Text area (matches original scaffold format) ──────────────────────────────
 void drawTextArea() {
-  float topY = height/2 - sizeOfInputArea/2;
-  float lx   = 20;
-
-  textFont(fontSmall); textAlign(LEFT); fill(110);
-  text("Phrase " + (currTrialNum + 1) + " of " + totalTrialNum, lx, topY - 78);
-
-  fill(80); textFont(fontMed);
-  text("Target:", lx, topY - 50);
-  float tx = lx + 90;
-  for (int i = 0; i < currentPhrase.length(); i++) {
-    char exp = currentPhrase.charAt(i);
-    if (i < currentTyped.length())
-      fill(currentTyped.charAt(i) == exp ? color(30,160,60) : color(200,40,40));
-    else
-      fill(80);
-    text("" + exp, tx, topY - 50);
-    tx += textWidth("" + exp);
-  }
-  fill(30); textFont(fontMed);
-  text("Typed:  " + currentTyped + "|", lx, topY - 18);
+  textFont(fontScaffold);
+  textAlign(LEFT);
+  fill(128);
+  text("Phrase " + (currTrialNum+1) + " of " + totalTrialNum, 70, 50);
+  fill(128);
+  text("Target:   " + currentPhrase, 70, 100);
+  text("Entered:  " + currentTyped + "|", 70, 140);
 }
 
 // ── U pad ─────────────────────────────────────────────────────────────────────
@@ -354,28 +343,67 @@ void drawUPad() {
 
   // ── 7. Selected letter — large, centred in the display zone ──
   boolean special = (selectedItem == 0 || selectedItem == 27);
+  float dispTop = cy - half;
+  float dispBot = uBotY - sw * 0.5;
+  float dispMid = (dispTop + dispBot) / 2.0;
+
+  // Find current word in phrase and show it with per-character colouring
+  // Current word = the word at index currentTyped.length() in the phrase
+  int typedLen = currentTyped.length();
+  // Find word start: last space before typedLen in currentPhrase
+  int wordStart = 0;
+  for (int i = 0; i < typedLen && i < currentPhrase.length(); i++) {
+    if (currentPhrase.charAt(i) == ' ') wordStart = i + 1;
+  }
+  // Find word end: next space after wordStart
+  int wordEnd = currentPhrase.length();
+  for (int i = wordStart; i < currentPhrase.length(); i++) {
+    if (currentPhrase.charAt(i) == ' ') { wordEnd = i; break; }
+  }
+  String currentWord = currentPhrase.substring(wordStart, wordEnd);
+
+  textFont(fontMed);
+  textAlign(CENTER);
+  float wordY = dispMid - 18;
+  // Draw char by char centered
+  float totalW = textWidth(currentWord);
+  float charX  = cx - totalW / 2.0;
+  for (int i = 0; i < currentWord.length(); i++) {
+    char exp      = currentWord.charAt(i);
+    int  absIdx   = wordStart + i;
+    float cw      = textWidth("" + exp);
+    if (absIdx < typedLen)
+      fill(currentTyped.charAt(absIdx) == exp ? color(80, 210, 90) : color(220, 60, 60));
+    else
+      fill(180);
+    text("" + exp, charX + cw / 2.0, wordY);
+    charX += cw;
+  }
+
+  // Big selected letter below the word
   fill(255, 185, 30);
   textFont(special ? fontLarge : fontHuge);
   textAlign(CENTER);
-  // Display zone: inner area between the two arms, top half
-  float dispTop = cy - half;
-  float dispBot = uBotY - sw * 0.5;
-  float dispCY  = (dispTop + dispBot) / 2.0 + 10;
-  text(itemLabel(selectedItem), cx, dispCY);
+  text(itemLabel(selectedItem), cx, dispMid + (special ? 30 : 50));
+
+  // Reset font so drawNextButton and drawTextArea aren't affected
+  textFont(fontScaffold);
 }
 
-// ── NEXT button ───────────────────────────────────────────────────────────────
+// ── NEXT button (matches original scaffold position) ──────────────────────────
 void drawNextButton() {
-  fill(45, 155, 75);
-  rect(620, 640, 160, 55, 8);
-  fill(255); textFont(fontMed); textAlign(CENTER);
-  text("NEXT >", 700, 677);
+  fill(255, 0, 0);
+  rect(600, 600, 200, 200);
+  fill(255);
+  textFont(fontScaffold);
+  textAlign(LEFT);
+  text("NEXT > ", 650, 650);
 }
 
 // ── Input ─────────────────────────────────────────────────────────────────────
 void mousePressed() {
   if (startTime == 0) return;
-  if (mouseX >= 620 && mouseX <= 780 && mouseY >= 640 && mouseY <= 695) {
+  if (mouseX >= 600 && mouseX <= 800 && mouseY >= 600 && mouseY <= 800) {
     nextTrial(); return;
   }
   if (nearU(mouseX, mouseY)) {
