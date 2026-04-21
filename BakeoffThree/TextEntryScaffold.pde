@@ -23,14 +23,17 @@ float cursorHeight, cursorWidth;
 //    bottom    (curved left corner → curved right corner)
 //    right arm (bottom-right, curved → top-right corner)
 //
-//  28 items: index 0 = DEL, 1-26 = a-z, 27 = space
+//  26 items: index 0-25 = a-z. DEL and SPC are separate buttons below the U.
 //  Press/drag on strip → select; release → commit.
 
-final int NUM_ITEMS = 28;
+final int NUM_ITEMS = 26;
 String alphabet = "abcdefghijklmnopqrstuvwxyz";
 int selectedItem = 13;
 boolean onPad = false;
 float totalPadDrag = 0;
+
+// DEL / SPC button geometry (set in setup)
+float btnY, btnH, btnW;
 
 // U geometry — all set in setup()
 float uSW;        // strip width
@@ -74,12 +77,17 @@ void setup() {
   float cx = width / 2.0, cy = height / 2.0, half = sizeOfInputArea / 2.0;
 
   uSW      = sizeOfInputArea * 0.16;   // ~40 px
-  uCornerR = uSW * 1.4;               // ~40 px — controls inner corner curve
+  uCornerR = uSW * 1.4;               // controls inner corner curve
+
+  // Reserve room at the bottom for DEL/SPC buttons
+  btnH  = uSW * 0.95;
+  btnW  = (sizeOfInputArea - uSW * 2) / 2.0 - 4; // half the inner width minus gap
+  btnY  = cy + half - btnH - 3;
 
   uLX   = cx - half + uSW * 0.5;
   uRX   = cx + half - uSW * 0.5;
-  uTopY = cy - half;                   // arms reach the very top corners
-  uBotY = cy + half - uSW * 0.5;
+  uTopY = cy - half;
+  uBotY = btnY - uSW * 0.5 - 3;      // U bottom strip sits above the buttons
 
   // Arc centers for the two curved bottom corners
   uBLcx = uLX + uCornerR;  uBLcy = uBotY - uCornerR;
@@ -218,9 +226,7 @@ boolean nearU(float mx, float my) {
 }
 
 String itemLabel(int i) {
-  if (i == 0)  return "DEL";
-  if (i == 27) return "SPC";
-  return ("" + alphabet.charAt(i - 1)).toUpperCase();
+  return ("" + alphabet.charAt(i)).toUpperCase();
 }
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
@@ -247,6 +253,7 @@ void draw() {
   if (startTime != 0) {
     drawTextArea();
     drawUPad();
+    drawActionButtons();
     drawNextButton();
   }
 
@@ -342,51 +349,45 @@ void drawUPad() {
   }
 
   // ── 7. Selected letter — large, centred in the display zone ──
-  boolean special = (selectedItem == 0 || selectedItem == 27);
   float dispTop = cy - half;
   float dispBot = uBotY - sw * 0.5;
   float dispMid = (dispTop + dispBot) / 2.0;
 
-  // Find current word in phrase and show it with per-character colouring
-  // Current word = the word at index currentTyped.length() in the phrase
-  int typedLen = currentTyped.length();
-  // Find word start: last space before typedLen in currentPhrase
-  int wordStart = 0;
-  for (int i = 0; i < typedLen && i < currentPhrase.length(); i++) {
-    if (currentPhrase.charAt(i) == ' ') wordStart = i + 1;
-  }
-  // Find word end: next space after wordStart
-  int wordEnd = currentPhrase.length();
-  for (int i = wordStart; i < currentPhrase.length(); i++) {
-    if (currentPhrase.charAt(i) == ' ') { wordEnd = i; break; }
-  }
-  String currentWord = currentPhrase.substring(wordStart, wordEnd);
-
-  textFont(fontMed);
-  textAlign(CENTER);
-  float wordY = dispMid - 18;
-  // Draw char by char centered
-  float totalW = textWidth(currentWord);
-  float charX  = cx - totalW / 2.0;
-  for (int i = 0; i < currentWord.length(); i++) {
-    char exp      = currentWord.charAt(i);
-    int  absIdx   = wordStart + i;
-    float cw      = textWidth("" + exp);
-    if (absIdx < typedLen)
-      fill(currentTyped.charAt(absIdx) == exp ? color(80, 210, 90) : color(220, 60, 60));
-    else
-      fill(180);
-    text("" + exp, charX + cw / 2.0, wordY);
-    charX += cw;
-  }
-
-  // Big selected letter below the word
   fill(255, 185, 30);
-  textFont(special ? fontLarge : fontHuge);
+  textFont(fontHuge);
   textAlign(CENTER);
-  text(itemLabel(selectedItem), cx, dispMid + (special ? 30 : 50));
+  text(itemLabel(selectedItem), cx, dispMid + 50);
 
   // Reset font so drawNextButton and drawTextArea aren't affected
+  textFont(fontScaffold);
+}
+
+// ── DEL / SPC buttons (inside watch, below the U) ────────────────────────────
+void drawActionButtons() {
+  float cx   = width / 2.0;
+  float cy   = height / 2.0;
+  float half = sizeOfInputArea / 2.0;
+  float gap  = 4;
+  float innerL = cx - half + uSW;
+  float innerR = cx + half - uSW;
+  float bw     = (innerR - innerL - gap) / 2.0;
+
+  // DEL — left
+  fill(160, 40, 40);
+  rect(innerL, btnY, bw, btnH, 5);
+  fill(255);
+  textFont(fontSmall);
+  textAlign(CENTER);
+  text("DEL", innerL + bw / 2.0, btnY + btnH / 2.0 + 4);
+
+  // SPC — right
+  fill(40, 110, 60);
+  rect(innerL + bw + gap, btnY, bw, btnH, 5);
+  fill(255);
+  textFont(fontSmall);
+  textAlign(CENTER);
+  text("SPC", innerL + bw + gap + bw / 2.0, btnY + btnH / 2.0 + 4);
+
   textFont(fontScaffold);
 }
 
@@ -406,6 +407,27 @@ void mousePressed() {
   if (mouseX >= 600 && mouseX <= 800 && mouseY >= 600 && mouseY <= 800) {
     nextTrial(); return;
   }
+
+  // DEL / SPC buttons
+  float cx     = width / 2.0;
+  float cy     = height / 2.0;
+  float half   = sizeOfInputArea / 2.0;
+  float innerL = cx - half + uSW;
+  float innerR = cx + half - uSW;
+  float gap    = 4;
+  float bw     = (innerR - innerL - gap) / 2.0;
+  if (mouseY >= btnY && mouseY <= btnY + btnH) {
+    if (mouseX >= innerL && mouseX <= innerL + bw) {
+      if (currentTyped.length() > 0)
+        currentTyped = currentTyped.substring(0, currentTyped.length() - 1);
+      return;
+    }
+    if (mouseX >= innerL + bw + gap && mouseX <= innerR) {
+      currentTyped += " ";
+      return;
+    }
+  }
+
   if (nearU(mouseX, mouseY)) {
     onPad = true;
     totalPadDrag = 0;
@@ -422,14 +444,7 @@ void mouseDragged() {
 void mouseReleased() {
   if (!onPad) return;
   onPad = false;
-  if (selectedItem == 0) {
-    if (currentTyped.length() > 0)
-      currentTyped = currentTyped.substring(0, currentTyped.length() - 1);
-  } else if (selectedItem == 27) {
-    currentTyped += " ";
-  } else {
-    currentTyped += alphabet.charAt(selectedItem - 1);
-  }
+  currentTyped += alphabet.charAt(selectedItem);
 }
 
 // ── Trial management (do not modify) ─────────────────────────────────────────
