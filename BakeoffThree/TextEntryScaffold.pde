@@ -428,24 +428,24 @@ void mousePressed() {
     }
   }
 
+  // Click on strip → commit current hovered letter
   if (nearU(mouseX, mouseY)) {
-    onPad = true;
-    totalPadDrag = 0;
-    selectedItem = constrain((int)(closestT(mouseX, mouseY) / uLen * NUM_ITEMS), 0, NUM_ITEMS - 1);
+    currentTyped += alphabet.charAt(selectedItem);
   }
 }
 
-void mouseDragged() {
-  if (!onPad) return;
-  totalPadDrag += dist(mouseX, mouseY, pmouseX, pmouseY);
-  selectedItem = constrain((int)(closestT(mouseX, mouseY) / uLen * NUM_ITEMS), 0, NUM_ITEMS - 1);
+void mouseMoved() {
+  // Hover updates selected letter continuously
+  if (nearU(mouseX, mouseY))
+    selectedItem = constrain((int)(closestT(mouseX, mouseY) / uLen * NUM_ITEMS), 0, NUM_ITEMS - 1);
 }
 
-void mouseReleased() {
-  if (!onPad) return;
-  onPad = false;
-  currentTyped += alphabet.charAt(selectedItem);
+void mouseDragged() {
+  if (nearU(mouseX, mouseY))
+    selectedItem = constrain((int)(closestT(mouseX, mouseY) / uLen * NUM_ITEMS), 0, NUM_ITEMS - 1);
 }
+
+void mouseReleased() {}
 
 // ── Trial management (do not modify) ─────────────────────────────────────────
 void nextTrial() {
