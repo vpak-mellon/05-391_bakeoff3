@@ -17,44 +17,35 @@ final float sizeOfInputArea = DPIofYourDeviceScreen * 1;
 PImage watch, mouseCursor;
 float cursorHeight, cursorWidth;
 
-// ── U-pad design ──────────────────────────────────────────────────────────────
-//  A thick strip runs along three edges of the watch face:
-//    left arm  (top-left corner  → bottom-left, curved into bottom)
-//    bottom    (curved left corner → curved right corner)
-//    right arm (bottom-right, curved → top-right corner)
+// ── T9 two-click design ───────────────────────────────────────────────────────
+//  4 quadrant buttons fill the watch face (minus a bottom strip for DEL/SPC).
+//  Letter groups:
+//    TL: a b c d e f g   (7)
+//    TR: h i j k l m     (6)
+//    BL: n o p q r s     (6)
+//    BR: t u v w x y z   (7)
 //
-//  26 items: index 0-25 = a-z. DEL and SPC are separate buttons below the U.
-//  Press/drag on strip → select; release → commit.
+//  Interaction:
+//    1st click in a quadrant  → activates that group, letter set by x-position
+//    hover after 1st click    → letter changes with finger x within the quadrant
+//    2nd click (anywhere)     → commits the current letter
+//    DEL / SPC strip          → instant tap, always accessible
 
-final int NUM_ITEMS = 26;
-String alphabet = "abcdefghijklmnopqrstuvwxyz";
-int selectedItem = 13;
-boolean onPad = false;
-float totalPadDrag = 0;
+String[] groups = { "abcdefg", "hijklm", "nopqrs", "tuvwxyz" };
 
-// DEL / SPC button geometry (set in setup)
-float btnY, btnH, btnW;
-
-// U geometry — all set in setup()
-float uSW;        // strip width
-float uCornerR;   // inner-corner curve radius
-float uLX, uRX;   // arm centerline X positions
-float uTopY;      // top of arms  (= watch face top edge)
-float uBotY;      // bottom-strip centerline Y
-// Bottom corner arc centers
-float uBLcx, uBLcy; // bottom-left arc center
-float uBRcx, uBRcy; // bottom-right arc center
-// Segment arc-lengths
-float uSeg0; // left arm straight
-float uSeg1; // bottom-left corner arc
-float uSeg2; // bottom straight
-float uSeg3; // bottom-right corner arc
-float uSeg4; // right arm straight
-float uLen;  // total
+int   activeGroup  = -1;   // which quadrant is active (-1 = idle)
+int   activeLetIdx = 0;    // letter index within active group
+float btnStripH;           // height of DEL/SPC strip at bottom
+float watchL, watchR, watchT, watchB; // watch face edges
+float midX, midY;          // centre of watch face
+float quadH;               // height of each quadrant
 
 PFont fontHuge, fontLarge, fontMed, fontSmall, fontScaffold;
 
-// ── Setup ─────────────────────────────────────────────────────────────────────
+// Quadrant colors (idle)
+color[] qColor = { color(35, 60, 130), color(80, 35, 120),
+                   color(30, 100, 80),  color(110, 55, 25) };
+
 void setup() {
   watch = loadImage("watchhand3smaller.png");
   phrases = loadStrings("phrases2.txt");
@@ -63,8 +54,8 @@ void setup() {
   size(800, 800);
 
   fontScaffold = createFont("Arial", 24);
-  fontHuge     = createFont("Arial Bold", 90);
-  fontLarge    = createFont("Arial", 26);
+  fontHuge     = createFont("Arial Bold", 82);
+  fontLarge    = createFont("Arial Bold", 22);
   fontMed      = createFont("Arial", 17);
   fontSmall    = createFont("Arial", 11);
   textFont(fontScaffold);
@@ -74,159 +65,15 @@ void setup() {
   cursorHeight = DPIofYourDeviceScreen * (400.0 / 250.0);
   cursorWidth  = cursorHeight * 0.6;
 
-  float cx = width / 2.0, cy = height / 2.0, half = sizeOfInputArea / 2.0;
-
-  uSW      = sizeOfInputArea * 0.16;   // ~40 px
-  uCornerR = uSW * 1.4;               // controls inner corner curve
-
-  // Reserve room at the bottom for DEL/SPC buttons
-  btnH  = uSW * 0.95;
-  btnW  = (sizeOfInputArea - uSW * 2) / 2.0 - 4; // half the inner width minus gap
-  btnY  = cy + half - btnH - 3;
-
-  uLX   = cx - half + uSW * 0.5;
-  uRX   = cx + half - uSW * 0.5;
-  uTopY = cy - half;
-  uBotY = btnY - uSW * 0.5 - 3;      // U bottom strip sits above the buttons
-
-  // Arc centers for the two curved bottom corners
-  uBLcx = uLX + uCornerR;  uBLcy = uBotY - uCornerR;
-  uBRcx = uRX - uCornerR;  uBRcy = uBotY - uCornerR;
-
-  uSeg0 = uBLcy - uTopY;            // left arm straight (top → arc start)
-  uSeg1 = uCornerR * HALF_PI;       // bottom-left corner arc
-  uSeg2 = uBRcx - uBLcx;           // bottom straight
-  uSeg3 = uCornerR * HALF_PI;       // bottom-right corner arc
-  uSeg4 = uSeg0;                    // right arm straight (symmetric)
-  uLen  = uSeg0 + uSeg1 + uSeg2 + uSeg3 + uSeg4;
-}
-
-// ── U path: arc-length t → (x, y) on centerline ───────────────────────────────
-// Path direction: down left arm → curve → right along bottom → curve → up right arm
-float[] uPt(float t) {
-  t = constrain(t, 0, uLen);
-  float base = 0;
-
-  // Seg 0 — left arm, straight down
-  if (t <= base + uSeg0) {
-    return new float[]{ uLX, uTopY + (t - base) };
-  }
-  base += uSeg0;
-
-  // Seg 1 — bottom-left corner arc
-  // Arc center: (uBLcx, uBLcy). Angle goes from π (point = left of center) to π/2 (point = below center).
-  // In screen coords (y-down): angle π → left, angle π/2 → DOWN. Arc goes from "left arm exit" down to "bottom entry".
-  // Wait, I need to recalculate correctly.
-  // At start of arc (s=0): point = (uLX, uBLcy) → relative to center = (-uCornerR, 0) → angle = π ✓
-  // At end of arc (s=1): point = (uBLcx, uBotY) → relative to center = (0, +uCornerR) → angle = π/2 (in Processing y-down: π/2 = downward) ✓
-  // So angle decreases from π to π/2.
-  if (t <= base + uSeg1) {
-    float s = (t - base) / uSeg1;
-    float angle = PI - s * HALF_PI;   // π → π/2
-    return new float[]{ uBLcx + uCornerR * cos(angle), uBLcy + uCornerR * sin(angle) };
-  }
-  base += uSeg1;
-
-  // Seg 2 — bottom, straight right
-  if (t <= base + uSeg2) {
-    return new float[]{ uBLcx + (t - base), uBotY };
-  }
-  base += uSeg2;
-
-  // Seg 3 — bottom-right corner arc
-  // Arc center: (uBRcx, uBRcy).
-  // At start (s=0): (uBRcx, uBotY) → relative = (0, +uCornerR) → angle = π/2 ✓
-  // At end (s=1): (uRX, uBRcy) → relative = (+uCornerR, 0) → angle = 0 ✓
-  // Angle decreases from π/2 to 0.
-  if (t <= base + uSeg3) {
-    float s = (t - base) / uSeg3;
-    float angle = HALF_PI - s * HALF_PI;   // π/2 → 0
-    return new float[]{ uBRcx + uCornerR * cos(angle), uBRcy + uCornerR * sin(angle) };
-  }
-  base += uSeg3;
-
-  // Seg 4 — right arm, straight up
-  float s = t - base;
-  return new float[]{ uRX, uBRcy - s };
-}
-
-// Inward-facing unit normal at arc-length t
-float[] uNorm(float t) {
-  float base = 0;
-  if (t <= base + uSeg0) return new float[]{  1,  0 }; // left arm → right
-  base += uSeg0;
-  if (t <= base + uSeg1) {
-    float s = (t - base) / uSeg1;
-    float angle = PI - s * HALF_PI;
-    return new float[]{ -cos(angle), -sin(angle) }; // toward arc center
-  }
-  base += uSeg1;
-  if (t <= base + uSeg2) return new float[]{  0, -1 }; // bottom → up
-  base += uSeg2;
-  if (t <= base + uSeg3) {
-    float s = (t - base) / uSeg3;
-    float angle = HALF_PI - s * HALF_PI;
-    return new float[]{ -cos(angle), -sin(angle) };
-  }
-  base += uSeg3;
-  return new float[]{ -1,  0 }; // right arm → left
-}
-
-// Arc-length t for item i (centered in its slot)
-float itemT(int i) {
-  return uLen * (i + 0.5f) / NUM_ITEMS;
-}
-
-// Closest arc-length t to mouse position (mx, my)
-float closestT(float mx, float my) {
-  float bestT = 0, bestD = 1e9;
-  float base = 0;
-
-  // Seg 0 — left arm
-  float cy0 = constrain(my, uTopY, uTopY + uSeg0);
-  float d0  = dist(mx, my, uLX, cy0);
-  if (d0 < bestD) { bestD = d0; bestT = base + (cy0 - uTopY); }
-  base += uSeg0;
-
-  // Seg 1 — bottom-left arc (angle range [π/2, π])
-  float a1 = atan2(my - uBLcy, mx - uBLcx);
-  a1 = constrain(a1, HALF_PI, PI);
-  float s1 = (PI - a1) / HALF_PI;  // maps [π→0, π/2→1]
-  float[] p1 = new float[]{ uBLcx + uCornerR * cos(a1), uBLcy + uCornerR * sin(a1) };
-  float d1 = dist(mx, my, p1[0], p1[1]);
-  if (d1 < bestD) { bestD = d1; bestT = base + s1 * uSeg1; }
-  base += uSeg1;
-
-  // Seg 2 — bottom straight
-  float cx2 = constrain(mx, uBLcx, uBRcx);
-  float d2  = dist(mx, my, cx2, uBotY);
-  if (d2 < bestD) { bestD = d2; bestT = base + (cx2 - uBLcx); }
-  base += uSeg2;
-
-  // Seg 3 — bottom-right arc (angle range [0, π/2])
-  float a3 = atan2(my - uBRcy, mx - uBRcx);
-  a3 = constrain(a3, 0, HALF_PI);
-  float s3 = 1.0 - a3 / HALF_PI;  // maps [π/2→0, 0→1]
-  float[] p3 = new float[]{ uBRcx + uCornerR * cos(a3), uBRcy + uCornerR * sin(a3) };
-  float d3 = dist(mx, my, p3[0], p3[1]);
-  if (d3 < bestD) { bestD = d3; bestT = base + s3 * uSeg3; }
-  base += uSeg3;
-
-  // Seg 4 — right arm
-  float cy4 = constrain(my, uTopY, uBRcy);
-  float d4  = dist(mx, my, uRX, cy4);
-  if (d4 < bestD) { bestD = d4; bestT = base + (uBRcy - cy4); }
-
-  return bestT;
-}
-
-boolean nearU(float mx, float my) {
-  float[] pt = uPt(closestT(mx, my));
-  return dist(mx, my, pt[0], pt[1]) <= uSW * 1.2;
-}
-
-String itemLabel(int i) {
-  return ("" + alphabet.charAt(i)).toUpperCase();
+  float half  = sizeOfInputArea / 2.0;
+  btnStripH   = sizeOfInputArea * 0.14;
+  watchL      = width  / 2.0 - half;
+  watchR      = width  / 2.0 + half;
+  watchT      = height / 2.0 - half;
+  watchB      = height / 2.0 + half;
+  midX        = width  / 2.0;
+  midY        = watchT + (watchB - btnStripH - watchT) / 2.0;
+  quadH       = (watchB - btnStripH - watchT) / 2.0;
 }
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
@@ -234,9 +81,9 @@ void draw() {
   background(225);
   drawWatch();
 
+  // Watch face background
   fill(15, 18, 28);
-  rect(width/2 - sizeOfInputArea/2, height/2 - sizeOfInputArea/2,
-       sizeOfInputArea, sizeOfInputArea);
+  rect(watchL, watchT, sizeOfInputArea, sizeOfInputArea);
 
   if (finishTime != 0) {
     fill(60); textFont(fontLarge); textAlign(CENTER);
@@ -252,8 +99,8 @@ void draw() {
 
   if (startTime != 0) {
     drawTextArea();
-    drawUPad();
-    drawActionButtons();
+    drawQuadrants();
+    drawStrip();
     drawNextButton();
   }
 
@@ -263,7 +110,7 @@ void draw() {
         cursorWidth, cursorHeight);
 }
 
-// ── Text area (matches original scaffold format) ──────────────────────────────
+// ── Text area (original scaffold format) ─────────────────────────────────────
 void drawTextArea() {
   textFont(fontScaffold);
   textAlign(LEFT);
@@ -274,177 +121,163 @@ void drawTextArea() {
   text("Entered:  " + currentTyped + "|", 70, 140);
 }
 
-// ── U pad ─────────────────────────────────────────────────────────────────────
-void drawUPad() {
-  float cx   = width / 2.0;
-  float cy   = height / 2.0;
-  float half = sizeOfInputArea / 2.0;
-  float sw   = uSW;
+// ── Four quadrants ────────────────────────────────────────────────────────────
+void drawQuadrants() {
+  // quadrant bounds: TL, TR, BL, BR
+  float[][] qx = { {watchL, midX}, {midX, watchR}, {watchL, midX}, {midX, watchR} };
+  float[][] qy = { {watchT, watchT+quadH}, {watchT, watchT+quadH},
+                   {watchT+quadH, watchB-btnStripH}, {watchT+quadH, watchB-btnStripH} };
 
-  // ── 1. Draw three solid rects for left arm, bottom strip, right arm ──
-  //    They intentionally overlap at the corner regions.
-  fill(28, 48, 95);
+  for (int g = 0; g < 4; g++) {
+    boolean active = (activeGroup == g);
+    String  grp    = groups[g];
+    int     n      = grp.length();
+    float   x0 = qx[g][0], x1 = qx[g][1];
+    float   y0 = qy[g][0], y1 = qy[g][1];
+    float   qw = x1 - x0, qh = y1 - y0;
+    float   cx = (x0 + x1) / 2.0, cy = (y0 + y1) / 2.0;
 
-  // Left arm: full height from top corner to where arc takes over
-  rect(cx - half, uTopY, sw, uBLcy - uTopY + uCornerR);
-  // Bottom strip: full width
-  rect(cx - half, uBotY - sw * 0.5, sizeOfInputArea, sw);
-  // Right arm: full height
-  rect(cx + half - sw, uTopY, sw, uBRcy - uTopY + uCornerR);
+    // Background
+    if (active) fill(lerpColor(qColor[g], color(255,185,30), 0.25));
+    else        fill(qColor[g]);
+    rect(x0, y0, qw, qh);
 
-  // ── 2. Fill the corner arc-band areas (same strip color) ──
-  //    Draw thick arcs to fill the rounded corner strips
-  noFill();
-  stroke(28, 48, 95);
-  strokeWeight(sw);
-  strokeCap(SQUARE);
-  // Bottom-left corner arc (from angle π to π/2, decreasing)
-  arc(uBLcx, uBLcy, uCornerR * 2, uCornerR * 2, HALF_PI, PI);
-  // Bottom-right corner arc (from angle 0 to π/2)
-  arc(uBRcx, uBRcy, uCornerR * 2, uCornerR * 2, 0, HALF_PI);
-  noStroke();
-
-  // ── 3. Carve inner corners with background color (concave curve) ──
-  //    Draws a filled quarter-disc in watch-background color to round the inner corner.
-  fill(15, 18, 28);
-  // Bottom-left inner corner: carve upper-right quadrant (from up → right visually)
-  arc(cx - half + sw, uBotY - sw * 0.5, uCornerR * 2, uCornerR * 2,
-      3 * HALF_PI, TWO_PI, PIE);
-  // Bottom-right inner corner: carve upper-left quadrant (from left → up visually)
-  arc(cx + half - sw, uBotY - sw * 0.5, uCornerR * 2, uCornerR * 2,
-      PI, 3 * HALF_PI, PIE);
-
-  // ── 4. Dots along the path ──
-  for (int i = 0; i < NUM_ITEMS; i++) {
-    float[] pt = uPt(itemT(i));
-    boolean sel = (i == selectedItem);
-    fill(sel ? color(255, 185, 30) : color(105, 150, 255, 130));
-    float r = sel ? 7 : 2.5;
-    ellipse(pt[0], pt[1], r * 2, r * 2);
-  }
-
-  // ── 5. Neighbour labels along the strip ──
-  for (int i = max(0, selectedItem - 4); i <= min(NUM_ITEMS - 1, selectedItem + 4); i++) {
-    if (i == selectedItem) continue;
-    float t     = itemT(i);
-    float[] pt  = uPt(t);
-    float[] nm  = uNorm(t);
-    float   d   = abs(i - selectedItem);
-    float   alp = lerp(210, 15, d / 5.0);
-
-    fill(200, alp);
-    textFont(fontSmall);
-    textAlign(CENTER);
-    text(itemLabel(i), pt[0] + nm[0] * sw * 0.85, pt[1] + nm[1] * sw * 0.85 + 4);
-  }
-
-  // ── 6. Glowing finger-position ring while touching ──
-  if (onPad) {
-    float[] pt = uPt(closestT(mouseX, mouseY));
-    noFill();
-    stroke(255, 185, 30, 180);
-    strokeWeight(3);
-    ellipse(pt[0], pt[1], sw * 1.7, sw * 1.7);
+    // Thin divider lines
+    stroke(15, 18, 28, 80); strokeWeight(1);
+    if (g == 1 || g == 3) line(x0, y0, x0, y1); // vertical centre
+    if (g == 2 || g == 3) line(x0, y0, x1, y0); // horizontal centre
     noStroke();
+
+    if (active) {
+      // Show hovered letter huge in centre
+      fill(255, 185, 30);
+      textFont(fontHuge);
+      textAlign(CENTER);
+      text(("" + grp.charAt(activeLetIdx)).toUpperCase(), cx, cy + 28);
+
+      // Show all letters small across the top of the quadrant, highlight active
+      textFont(fontSmall);
+      float slotW = qw / n;
+      for (int i = 0; i < n; i++) {
+        float lx = x0 + slotW * i + slotW / 2.0;
+        fill(i == activeLetIdx ? color(255,185,30) : color(200, 100));
+        rect(x0 + slotW * i, y0, slotW, 3); // thin indicator bar
+        fill(i == activeLetIdx ? color(255,185,30) : color(200, 140));
+        text(("" + grp.charAt(i)).toUpperCase(), lx, y0 + 14);
+      }
+
+    } else {
+      // Idle: show group range label
+      fill(200, 160);
+      textFont(fontLarge);
+      textAlign(CENTER);
+      String label = ("" + grp.charAt(0)).toUpperCase() + "–" +
+                     ("" + grp.charAt(n-1)).toUpperCase();
+      text(label, cx, cy + 8);
+    }
   }
-
-  // ── 7. Selected letter — large, centred in the display zone ──
-  float dispTop = cy - half;
-  float dispBot = uBotY - sw * 0.5;
-  float dispMid = (dispTop + dispBot) / 2.0;
-
-  fill(255, 185, 30);
-  textFont(fontHuge);
-  textAlign(CENTER);
-  text(itemLabel(selectedItem), cx, dispMid + 50);
-
-  // Reset font so drawNextButton and drawTextArea aren't affected
-  textFont(fontScaffold);
 }
 
-// ── DEL / SPC buttons (inside watch, below the U) ────────────────────────────
-void drawActionButtons() {
-  float cx   = width / 2.0;
-  float cy   = height / 2.0;
+// ── DEL / SPC strip ───────────────────────────────────────────────────────────
+void drawStrip() {
+  float y   = watchB - btnStripH;
   float half = sizeOfInputArea / 2.0;
   float gap  = 4;
-  float innerL = cx - half + uSW;
-  float innerR = cx + half - uSW;
-  float bw     = (innerR - innerL - gap) / 2.0;
+  float bw   = (sizeOfInputArea - gap) / 2.0;
 
-  // DEL — left
-  fill(160, 40, 40);
-  rect(innerL, btnY, bw, btnH, 5);
-  fill(255);
-  textFont(fontSmall);
-  textAlign(CENTER);
-  text("DEL", innerL + bw / 2.0, btnY + btnH / 2.0 + 4);
+  fill(140, 35, 35);
+  rect(watchL, y, bw, btnStripH, 0, 0, 0, 5);
+  fill(255); textFont(fontSmall); textAlign(CENTER);
+  text("DEL", watchL + bw/2.0, y + btnStripH/2.0 + 4);
 
-  // SPC — right
-  fill(40, 110, 60);
-  rect(innerL + bw + gap, btnY, bw, btnH, 5);
-  fill(255);
-  textFont(fontSmall);
-  textAlign(CENTER);
-  text("SPC", innerL + bw + gap + bw / 2.0, btnY + btnH / 2.0 + 4);
+  fill(35, 110, 55);
+  rect(watchL + bw + gap, y, bw, btnStripH, 0, 0, 5, 0);
+  fill(255); textFont(fontSmall); textAlign(CENTER);
+  text("SPACE", watchL + bw + gap + bw/2.0, y + btnStripH/2.0 + 4);
 
   textFont(fontScaffold);
 }
 
-// ── NEXT button (matches original scaffold position) ──────────────────────────
+// ── NEXT button ───────────────────────────────────────────────────────────────
 void drawNextButton() {
   fill(255, 0, 0);
   rect(600, 600, 200, 200);
-  fill(255);
-  textFont(fontScaffold);
-  textAlign(LEFT);
+  fill(255); textFont(fontScaffold); textAlign(LEFT);
   text("NEXT > ", 650, 650);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+// Which group (0-3) does this point fall in? Returns -1 if none.
+int groupAt(float x, float y) {
+  if (x < watchL || x > watchR || y < watchT || y >= watchB - btnStripH) return -1;
+  boolean left = (x < midX);
+  boolean top  = (y < watchT + quadH);
+  if (top  && left)  return 0;
+  if (top  && !left) return 1;
+  if (!top && left)  return 2;
+  return 3;
+}
+
+// Letter index within a group based on x position inside that quadrant
+int letterIdxAt(int g, float x) {
+  float x0 = (g == 0 || g == 2) ? watchL : midX;
+  float x1 = (g == 0 || g == 2) ? midX   : watchR;
+  float t   = constrain((x - x0) / (x1 - x0), 0, 0.9999);
+  return (int)(t * groups[g].length());
+}
+
+boolean inStrip(float x, float y) {
+  return y >= watchB - btnStripH && y <= watchB && x >= watchL && x <= watchR;
 }
 
 // ── Input ─────────────────────────────────────────────────────────────────────
 void mousePressed() {
   if (startTime == 0) return;
+
+  // NEXT
   if (mouseX >= 600 && mouseX <= 800 && mouseY >= 600 && mouseY <= 800) {
-    nextTrial(); return;
+    nextTrial(); activeGroup = -1; return;
   }
 
-  // DEL / SPC buttons
-  float cx     = width / 2.0;
-  float cy     = height / 2.0;
-  float half   = sizeOfInputArea / 2.0;
-  float innerL = cx - half + uSW;
-  float innerR = cx + half - uSW;
-  float gap    = 4;
-  float bw     = (innerR - innerL - gap) / 2.0;
-  if (mouseY >= btnY && mouseY <= btnY + btnH) {
-    if (mouseX >= innerL && mouseX <= innerL + bw) {
+  // DEL / SPC strip
+  if (inStrip(mouseX, mouseY)) {
+    float bw = (sizeOfInputArea - 4) / 2.0;
+    if (mouseX <= watchL + bw) {
       if (currentTyped.length() > 0)
         currentTyped = currentTyped.substring(0, currentTyped.length() - 1);
-      return;
-    }
-    if (mouseX >= innerL + bw + gap && mouseX <= innerR) {
+    } else {
       currentTyped += " ";
-      return;
     }
+    activeGroup = -1;
+    return;
   }
 
-  if (nearU(mouseX, mouseY)) {
-    onPad = true;
-    totalPadDrag = 0;
-    selectedItem = constrain((int)(closestT(mouseX, mouseY) / uLen * NUM_ITEMS), 0, NUM_ITEMS - 1);
+  // Single click — commit current hovered letter
+  if (activeGroup >= 0) {
+    currentTyped += groups[activeGroup].charAt(activeLetIdx);
+    activeGroup = -1;
+  }
+}
+
+void mouseMoved() {
+  // Hover updates active group and letter continuously
+  int g = groupAt(mouseX, mouseY);
+  if (g >= 0) {
+    activeGroup  = g;
+    activeLetIdx = letterIdxAt(g, mouseX);
+  } else {
+    activeGroup = -1;
   }
 }
 
 void mouseDragged() {
-  if (!onPad) return;
-  totalPadDrag += dist(mouseX, mouseY, pmouseX, pmouseY);
-  selectedItem = constrain((int)(closestT(mouseX, mouseY) / uLen * NUM_ITEMS), 0, NUM_ITEMS - 1);
-}
-
-void mouseReleased() {
-  if (!onPad) return;
-  onPad = false;
-  currentTyped += alphabet.charAt(selectedItem);
+  int g = groupAt(mouseX, mouseY);
+  if (g >= 0) {
+    activeGroup  = g;
+    activeLetIdx = letterIdxAt(g, mouseX);
+  } else {
+    activeGroup = -1;
+  }
 }
 
 // ── Trial management (do not modify) ─────────────────────────────────────────
