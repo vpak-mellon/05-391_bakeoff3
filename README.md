@@ -4,6 +4,7 @@ important files:
 include the above file alongside the main code
 
 call loadWords during setup
+
 call topChoices (after each keystroke) to get autocomplete recommendations
   (an example of a way to wrap topChoices is given in printRecommendation)
 
