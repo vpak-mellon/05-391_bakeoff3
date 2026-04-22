@@ -1,7 +1,7 @@
 important files:
   Prototype 2 autocomplete/recommender.pde
 
-include the above file in the folder alongside the main code
+include the above file alongside the main code
 
 call loadWords during setup
 call topChoices (after each keystroke) to get autocomplete recommendations
