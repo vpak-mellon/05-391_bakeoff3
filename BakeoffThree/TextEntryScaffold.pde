@@ -17,34 +17,30 @@ final float sizeOfInputArea = DPIofYourDeviceScreen * 1;
 PImage watch, mouseCursor;
 float cursorHeight, cursorWidth;
 
-// ── T9 two-click design ───────────────────────────────────────────────────────
-//  4 quadrant buttons fill the watch face (minus a bottom strip for DEL/SPC).
-//  Letter groups:
-//    TL: a b c d e f g   (7)
-//    TR: h i j k l m     (6)
-//    BL: n o p q r s     (6)
-//    BR: t u v w x y z   (7)
+// ── 6-zone drag design ────────────────────────────────────────────────────────
+//  3 columns × 2 rows = 6 zones, ~4-5 letters each.
+//  Press in a zone, drag left/right to pick letter, release to commit.
+//  Letters shown at top of each zone. DEL/SPC strip at bottom.
 //
-//  Interaction:
-//    1st click in a quadrant  → activates that group, letter set by x-position
-//    hover after 1st click    → letter changes with finger x within the quadrant
-//    2nd click (anywhere)     → commits the current letter
-//    DEL / SPC strip          → instant tap, always accessible
+//  Zone layout:
+//    0: a b c d e   1: f g h i j   2: k l m n
+//    3: o p q r s   4: t u v w     5: x y z ⎵(spc)  ← space as last item
 
-String[] groups = { "abcdefg", "hijklm", "nopqrs", "tuvwxyz" };
+String[] groups = { "abcd", "efgh", "ijkl", "mnopq", "rstu", "vwxyz" };
 
-int   activeGroup  = -1;   // which quadrant is active (-1 = idle)
-int   activeLetIdx = 0;    // letter index within active group
-float btnStripH;           // height of DEL/SPC strip at bottom
-float watchL, watchR, watchT, watchB; // watch face edges
-float midX, midY;          // centre of watch face
-float quadH;               // height of each quadrant
+int   activeGroup  = -1;
+int   activeLetIdx = 0;
+float btnStripH, previewH;
+float watchL, watchR, watchT, watchB;
+float zoneW, zoneH;  // size of each zone (2 cols, 3 rows)
+float zonesT;        // y where zones begin (after preview strip)
 
 PFont fontHuge, fontLarge, fontMed, fontSmall, fontScaffold;
 
-// Quadrant colors (idle)
-color[] qColor = { color(35, 60, 130), color(80, 35, 120),
-                   color(30, 100, 80),  color(110, 55, 25) };
+color[] zColor = {
+  color(35, 60, 130),  color(75, 35, 120),  color(25, 100, 85),
+  color(115, 55, 25),  color(30, 95, 50),   color(95, 30, 60)
+};
 
 void setup() {
   watch = loadImage("watchhand3smaller.png");
@@ -71,9 +67,10 @@ void setup() {
   watchR      = width  / 2.0 + half;
   watchT      = height / 2.0 - half;
   watchB      = height / 2.0 + half;
-  midX        = width  / 2.0;
-  midY        = watchT + (watchB - btnStripH - watchT) / 2.0;
-  quadH       = (watchB - btnStripH - watchT) / 2.0;
+  previewH    = sizeOfInputArea * 0.14;
+  zonesT      = watchT + previewH;
+  zoneW       = sizeOfInputArea / 2.0;
+  zoneH       = (watchB - btnStripH - zonesT) / 3.0;
 }
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
@@ -99,7 +96,7 @@ void draw() {
 
   if (startTime != 0) {
     drawTextArea();
-    drawQuadrants();
+    drawZones();
     drawStrip();
     drawNextButton();
   }
@@ -121,61 +118,72 @@ void drawTextArea() {
   text("Entered:  " + currentTyped + "|", 70, 140);
 }
 
-// ── Four quadrants ────────────────────────────────────────────────────────────
-void drawQuadrants() {
-  // quadrant bounds: TL, TR, BL, BR
-  float[][] qx = { {watchL, midX}, {midX, watchR}, {watchL, midX}, {midX, watchR} };
-  float[][] qy = { {watchT, watchT+quadH}, {watchT, watchT+quadH},
-                   {watchT+quadH, watchB-btnStripH}, {watchT+quadH, watchB-btnStripH} };
+// ── Six zones (2 cols × 3 rows) ──────────────────────────────────────────────
+void drawZones() {
+  // Preview strip at top — shows active letter above finger
+  fill(30, 34, 48);
+  rect(watchL, watchT, sizeOfInputArea, previewH);
+  if (activeGroup >= 0) {
+    String grp = groups[activeGroup];
+    int n = grp.length();
+    float slotW = sizeOfInputArea / n;
+    for (int i = 0; i < n; i++) {
+      float lx = watchL + slotW * i + slotW / 2.0;
+      char c = grp.charAt(i);
+      if (i == activeLetIdx) {
+        fill(255, 185, 30);
+        textFont(fontLarge);
+      } else {
+        fill(160, 120);
+        textFont(fontSmall);
+      }
+      textAlign(CENTER);
+      text((c == ' ') ? "SPC" : ("" + c).toUpperCase(), lx, watchT + previewH * 0.7);
+    }
+  }
 
-  for (int g = 0; g < 4; g++) {
+  for (int g = 0; g < 6; g++) {
+    int   col  = g % 2;
+    int   row  = g / 2;
+    float x0   = watchL + col * zoneW;
+    float y0   = zonesT + row * zoneH;
+    float x1   = x0 + zoneW;
+    float y1   = y0 + zoneH;
+    float cx   = (x0 + x1) / 2.0;
+    float cy   = (y0 + y1) / 2.0;
+    String grp = groups[g];
+    int    n   = grp.length();
     boolean active = (activeGroup == g);
-    String  grp    = groups[g];
-    int     n      = grp.length();
-    float   x0 = qx[g][0], x1 = qx[g][1];
-    float   y0 = qy[g][0], y1 = qy[g][1];
-    float   qw = x1 - x0, qh = y1 - y0;
-    float   cx = (x0 + x1) / 2.0, cy = (y0 + y1) / 2.0;
 
     // Background
-    if (active) fill(lerpColor(qColor[g], color(255,185,30), 0.25));
-    else        fill(qColor[g]);
-    rect(x0, y0, qw, qh);
+    if (active) fill(lerpColor(zColor[g], color(255, 185, 30), 0.25));
+    else        fill(zColor[g]);
+    rect(x0, y0, zoneW, zoneH);
 
-    // Thin divider lines
+    // Divider lines
     stroke(15, 18, 28, 80); strokeWeight(1);
-    if (g == 1 || g == 3) line(x0, y0, x0, y1); // vertical centre
-    if (g == 2 || g == 3) line(x0, y0, x1, y0); // horizontal centre
+    if (col > 0) line(x0, y0, x0, y1);
+    if (row > 0) line(x0, y0, x1, y0);
     noStroke();
 
+    // Zone label (always shown — range or active letter)
+    textAlign(CENTER);
+    char first = grp.charAt(0);
+    char last  = grp.charAt(n - 1);
     if (active) {
-      // Show hovered letter huge in centre
       fill(255, 185, 30);
-      textFont(fontHuge);
-      textAlign(CENTER);
-      text(("" + grp.charAt(activeLetIdx)).toUpperCase(), cx, cy + 28);
-
-      // Show all letters small across the top of the quadrant, highlight active
-      textFont(fontSmall);
-      float slotW = qw / n;
-      for (int i = 0; i < n; i++) {
-        float lx = x0 + slotW * i + slotW / 2.0;
-        fill(i == activeLetIdx ? color(255,185,30) : color(200, 100));
-        rect(x0 + slotW * i, y0, slotW, 3); // thin indicator bar
-        fill(i == activeLetIdx ? color(255,185,30) : color(200, 140));
-        text(("" + grp.charAt(i)).toUpperCase(), lx, y0 + 14);
-      }
-
-    } else {
-      // Idle: show group range label
-      fill(200, 160);
       textFont(fontLarge);
-      textAlign(CENTER);
-      String label = ("" + grp.charAt(0)).toUpperCase() + "–" +
-                     ("" + grp.charAt(n-1)).toUpperCase();
+      char ch = grp.charAt(activeLetIdx);
+      text((ch == ' ') ? "SPC" : ("" + ch).toUpperCase(), cx, cy + 8);
+    } else {
+      fill(200, 160);
+      textFont(fontMed);
+      String label = ("" + first).toUpperCase() + "–" +
+                     ((last == ' ') ? "SPC" : ("" + last).toUpperCase());
       text(label, cx, cy + 8);
     }
   }
+  textFont(fontScaffold);
 }
 
 // ── DEL / SPC strip ───────────────────────────────────────────────────────────
@@ -207,22 +215,18 @@ void drawNextButton() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-// Which group (0-3) does this point fall in? Returns -1 if none.
+// Which zone (0-5) does this point fall in? Returns -1 if none.
 int groupAt(float x, float y) {
-  if (x < watchL || x > watchR || y < watchT || y >= watchB - btnStripH) return -1;
-  boolean left = (x < midX);
-  boolean top  = (y < watchT + quadH);
-  if (top  && left)  return 0;
-  if (top  && !left) return 1;
-  if (!top && left)  return 2;
-  return 3;
+  if (x < watchL || x > watchR || y < zonesT || y >= watchB - btnStripH) return -1;
+  int col = (x < watchL + zoneW) ? 0 : 1;
+  int row = (int)constrain((y - zonesT) / zoneH, 0, 2);
+  return row * 2 + col;
 }
 
-// Letter index within a group based on x position inside that quadrant
+// Letter index within a zone based on x position
 int letterIdxAt(int g, float x) {
-  float x0 = (g == 0 || g == 2) ? watchL : midX;
-  float x1 = (g == 0 || g == 2) ? midX   : watchR;
-  float t   = constrain((x - x0) / (x1 - x0), 0, 0.9999);
+  float x0 = watchL + (g % 2) * zoneW;
+  float t   = constrain((x - x0) / zoneW, 0, 0.9999);
   return (int)(t * groups[g].length());
 }
 
@@ -239,7 +243,7 @@ void mousePressed() {
     nextTrial(); activeGroup = -1; return;
   }
 
-  // DEL / SPC strip
+  // DEL / SPC strip — commit on press
   if (inStrip(mouseX, mouseY)) {
     float bw = (sizeOfInputArea - 4) / 2.0;
     if (mouseX <= watchL + bw) {
@@ -252,15 +256,16 @@ void mousePressed() {
     return;
   }
 
-  // Single click — commit current hovered letter
-  if (activeGroup >= 0) {
-    currentTyped += groups[activeGroup].charAt(activeLetIdx);
-    activeGroup = -1;
+  // Start drag — activate the quadrant under the finger
+  int g = groupAt(mouseX, mouseY);
+  if (g >= 0) {
+    activeGroup  = g;
+    activeLetIdx = letterIdxAt(g, mouseX);
   }
 }
 
 void mouseMoved() {
-  // Hover updates active group and letter continuously
+  // Hover with no button: update preview only
   int g = groupAt(mouseX, mouseY);
   if (g >= 0) {
     activeGroup  = g;
@@ -271,11 +276,20 @@ void mouseMoved() {
 }
 
 void mouseDragged() {
+  // Drag within quadrant scrolls the letter selection
   int g = groupAt(mouseX, mouseY);
   if (g >= 0) {
     activeGroup  = g;
     activeLetIdx = letterIdxAt(g, mouseX);
-  } else {
+  }
+}
+
+void mouseReleased() {
+  if (startTime == 0) return;
+  if (inStrip(mouseX, mouseY)) return; // strip handled on press
+  // Commit whichever letter is selected
+  if (activeGroup >= 0) {
+    currentTyped += groups[activeGroup].charAt(activeLetIdx);
     activeGroup = -1;
   }
 }
