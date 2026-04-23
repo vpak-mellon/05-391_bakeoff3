@@ -252,7 +252,17 @@ void mousePressed() {
     return;
   }
 
-  // Single click — commit current hovered letter
+  // Start drag — activate the quadrant under the finger
+  int g = groupAt(mouseX, mouseY);
+  if (g >= 0) {
+    activeGroup  = g;
+    activeLetIdx = letterIdxAt(g, mouseX);
+  }
+}
+
+void mouseReleased() {
+  if (startTime == 0) return;
+  if (inStrip(mouseX, mouseY)) return;
   if (activeGroup >= 0) {
     currentTyped += groups[activeGroup].charAt(activeLetIdx);
     activeGroup = -1;
