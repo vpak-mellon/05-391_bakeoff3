@@ -1,6 +1,8 @@
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Random;
+import java.util.ArrayList;
+import java.util.HashSet;
 
 // Set the DPI to make your smartwatch 1 inch square.
 final int DPIofYourDeviceScreen = 250;
@@ -8,6 +10,9 @@ final int DPIofYourDeviceScreen = 250;
 // Do not change the following variables
 String[] phrases;
 String[] suggestions;
+String[] wordList;
+String currentSuggestion = "";
+float dragStartX = 0, dragStartY = 0;
 int totalTrialNum = 2;
 int currTrialNum = 0;
 float startTime = 0, finishTime = 0, lastTime = 0;
@@ -35,10 +40,11 @@ String[] groups = { "abcdefg", "hijklm", "nopqrs", "tuvwxyz" };
 
 int   activeGroup  = -1;   // which quadrant is active (-1 = idle)
 int   activeLetIdx = 0;    // letter index within active group
-float btnStripH;           // height of DEL/SPC strip at bottom
+float btnStripH, suggestionH; // strips at bottom and top
 float watchL, watchR, watchT, watchB; // watch face edges
 float midX, midY;          // centre of watch face
 float quadH;               // height of each quadrant
+float zonesT;              // y where quadrants begin (after suggestion strip)
 
 PFont fontHuge, fontLarge, fontMed, fontSmall, fontScaffold;
 
@@ -50,6 +56,16 @@ void setup() {
   watch = loadImage("watchhand3smaller.png");
   phrases = loadStrings("phrases2.txt");
   Collections.shuffle(Arrays.asList(phrases), new Random());
+
+  // Build word list from all phrases
+  HashSet<String> words = new HashSet<String>();
+  for (String p : phrases) {
+    for (String w : p.trim().toLowerCase().split("\\s+")) {
+      if (w.length() > 0) words.add(w);
+    }
+  }
+  wordList = words.toArray(new String[0]);
+  Arrays.sort(wordList);
   orientation(LANDSCAPE);
   size(800, 800);
 
@@ -66,14 +82,16 @@ void setup() {
   cursorWidth  = cursorHeight * 0.6;
 
   float half  = sizeOfInputArea / 2.0;
-  btnStripH   = sizeOfInputArea * 0.14;
+  btnStripH   = sizeOfInputArea * 0.16;
+  suggestionH = btnStripH; // merged — same strip
   watchL      = width  / 2.0 - half;
   watchR      = width  / 2.0 + half;
   watchT      = height / 2.0 - half;
   watchB      = height / 2.0 + half;
+  zonesT      = watchT + btnStripH;
   midX        = width  / 2.0;
-  midY        = watchT + (watchB - btnStripH - watchT) / 2.0;
-  quadH       = (watchB - btnStripH - watchT) / 2.0;
+  midY        = zonesT + (watchB - zonesT) / 2.0;
+  quadH       = (watchB - zonesT) / 2.0;
 }
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
@@ -99,8 +117,9 @@ void draw() {
 
   if (startTime != 0) {
     drawTextArea();
+    updateSuggestion();
+    drawSuggestion();
     drawQuadrants();
-    drawStrip();
     drawNextButton();
   }
 
@@ -121,12 +140,76 @@ void drawTextArea() {
   text("Entered:  " + currentTyped + "|", 70, watchT - 22);
 }
 
+// ── Autocomplete ─────────────────────────────────────────────────────────────
+void updateSuggestion() {
+  // Get the last partial word being typed
+  String[] parts = currentTyped.split(" ", -1);
+  String partial = parts[parts.length - 1].toLowerCase();
+  currentSuggestion = "";
+  if (partial.length() < 3) return;
+  for (String w : wordList) {
+    if (w.startsWith(partial) && !w.equals(partial)) {
+      currentSuggestion = w;
+      break;
+    }
+  }
+}
+
+void drawSuggestion() {
+  float gap = 3;
+  float bw  = (sizeOfInputArea - gap * 2) / 3.0;
+  float ty  = watchT + btnStripH / 2.0 + 5;
+
+  // DEL
+  fill(140, 35, 35);
+  rect(watchL, watchT, bw, btnStripH, 0, 0, 0, 0);
+  fill(255); textFont(fontSmall); textAlign(CENTER);
+  text("DEL", watchL + bw / 2.0, ty);
+
+  // Middle — suggestion word (partial + completion) or neutral
+  fill(35, 50, 80);
+  rect(watchL + bw + gap, watchT, bw, btnStripH);
+  textFont(fontSmall);
+  String[] parts = currentTyped.split(" ", -1);
+  String partial = parts[parts.length - 1];
+  String completion = (currentSuggestion.length() > partial.length())
+                      ? currentSuggestion.substring(partial.length()) : "";
+  float pw = textWidth(partial);
+  float cw = textWidth(completion);
+  float startX = midX - (pw + cw) / 2.0;
+  textAlign(LEFT);
+  fill(255);
+  text(partial, startX, ty);
+  fill(80, 160, 255);
+  text(completion, startX + pw, ty);
+
+  // SPACE
+  fill(35, 110, 55);
+  rect(watchL + bw * 2 + gap * 2, watchT, bw, btnStripH, 0, 0, 0, 0);
+  fill(255); textFont(fontSmall); textAlign(CENTER);
+  text("SPC", watchL + bw * 2 + gap * 2 + bw / 2.0, ty);
+
+  textFont(fontScaffold);
+}
+
+boolean inSuggestion(float x, float y) {
+  return y >= watchT && y <= watchT + suggestionH && x >= watchL && x <= watchR;
+}
+
+void acceptSuggestion() {
+  if (currentSuggestion.length() == 0) return;
+  // Replace the partial word with the full suggestion + space
+  int lastSpace = currentTyped.lastIndexOf(' ');
+  currentTyped = (lastSpace >= 0 ? currentTyped.substring(0, lastSpace + 1) : "") + currentSuggestion + " ";
+  currentSuggestion = "";
+}
+
 // ── Four quadrants ────────────────────────────────────────────────────────────
 void drawQuadrants() {
   // quadrant bounds: TL, TR, BL, BR
   float[][] qx = { {watchL, midX}, {midX, watchR}, {watchL, midX}, {midX, watchR} };
-  float[][] qy = { {watchT, watchT+quadH}, {watchT, watchT+quadH},
-                   {watchT+quadH, watchB-btnStripH}, {watchT+quadH, watchB-btnStripH} };
+  float[][] qy = { {zonesT, zonesT+quadH}, {zonesT, zonesT+quadH},
+                   {zonesT+quadH, watchB}, {zonesT+quadH, watchB} };
 
   for (int g = 0; g < 4; g++) {
     boolean active = (activeGroup == g);
@@ -161,7 +244,7 @@ void drawQuadrants() {
       for (int i = 0; i < n; i++) {
         float lx = x0 + slotW * i + slotW / 2.0;
         fill(i == activeLetIdx ? color(255,185,30) : color(200, 100));
-        rect(x0 + slotW * i, y0, slotW, 3); // thin indicator bar
+        rect(x0 + slotW * i, y0, slotW, 3);
         fill(i == activeLetIdx ? color(255,185,30) : color(200, 140));
         text(("" + grp.charAt(i)).toUpperCase(), lx, y0 + 14);
       }
@@ -179,24 +262,6 @@ void drawQuadrants() {
 }
 
 // ── DEL / SPC strip ───────────────────────────────────────────────────────────
-void drawStrip() {
-  float y   = watchB - btnStripH;
-  float half = sizeOfInputArea / 2.0;
-  float gap  = 4;
-  float bw   = (sizeOfInputArea - gap) / 2.0;
-
-  fill(140, 35, 35);
-  rect(watchL, y, bw, btnStripH, 0, 0, 0, 5);
-  fill(255); textFont(fontSmall); textAlign(CENTER);
-  text("DEL", watchL + bw/2.0, y + btnStripH/2.0 + 4);
-
-  fill(35, 110, 55);
-  rect(watchL + bw + gap, y, bw, btnStripH, 0, 0, 5, 0);
-  fill(255); textFont(fontSmall); textAlign(CENTER);
-  text("SPACE", watchL + bw + gap + bw/2.0, y + btnStripH/2.0 + 4);
-
-  textFont(fontScaffold);
-}
 
 // ── NEXT button ───────────────────────────────────────────────────────────────
 void drawNextButton() {
@@ -206,12 +271,13 @@ void drawNextButton() {
   text("NEXT > ", 650, 650);
 }
 
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 // Which group (0-3) does this point fall in? Returns -1 if none.
 int groupAt(float x, float y) {
-  if (x < watchL || x > watchR || y < watchT || y >= watchB - btnStripH) return -1;
+  if (x < watchL || x > watchR || y < zonesT || y >= watchB) return -1;
   boolean left = (x < midX);
-  boolean top  = (y < watchT + quadH);
+  boolean top  = (y < zonesT + quadH);
   if (top  && left)  return 0;
   if (top  && !left) return 1;
   if (!top && left)  return 2;
@@ -227,7 +293,7 @@ int letterIdxAt(int g, float x) {
 }
 
 boolean inStrip(float x, float y) {
-  return y >= watchB - btnStripH && y <= watchB && x >= watchL && x <= watchR;
+  return y >= watchT && y <= watchT + btnStripH && x >= watchL && x <= watchR;
 }
 
 // ── Input ─────────────────────────────────────────────────────────────────────
@@ -239,18 +305,25 @@ void mousePressed() {
     nextTrial(); activeGroup = -1; return;
   }
 
-  // DEL / SPC strip
+  // DEL / suggestion word / SPC strip
   if (inStrip(mouseX, mouseY)) {
-    float bw = (sizeOfInputArea - 4) / 2.0;
-    if (mouseX <= watchL + bw) {
+    float gap = 3;
+    float bw  = (sizeOfInputArea - gap * 2) / 3.0;
+    float rel = mouseX - watchL;
+    if (rel <= bw) {
       if (currentTyped.length() > 0)
         currentTyped = currentTyped.substring(0, currentTyped.length() - 1);
+    } else if (rel <= bw + gap + bw) {
+      acceptSuggestion();
     } else {
       currentTyped += " ";
     }
     activeGroup = -1;
     return;
   }
+
+  dragStartX = mouseX;
+  dragStartY = mouseY;
 
   // Start drag — activate the quadrant under the finger
   int g = groupAt(mouseX, mouseY);
@@ -263,6 +336,7 @@ void mousePressed() {
 void mouseReleased() {
   if (startTime == 0) return;
   if (inStrip(mouseX, mouseY)) return;
+
   if (activeGroup >= 0) {
     currentTyped += groups[activeGroup].charAt(activeLetIdx);
     activeGroup = -1;
