@@ -146,7 +146,7 @@ void updateSuggestion() {
   String[] parts = currentTyped.split(" ", -1);
   String partial = parts[parts.length - 1].toLowerCase();
   currentSuggestion = "";
-  if (partial.length() < 3) return;
+  if (partial.length() < 2) return;
   for (String w : wordList) {
     if (w.startsWith(partial) && !w.equals(partial)) {
       currentSuggestion = w;
@@ -169,7 +169,7 @@ void drawSuggestion() {
   // Middle — suggestion word (partial + completion) or neutral
   fill(35, 50, 80);
   rect(watchL + bw + gap, watchT, bw, btnStripH);
-  textFont(fontSmall);
+  textFont(fontMed);
   String[] parts = currentTyped.split(" ", -1);
   String partial = parts[parts.length - 1];
   String completion = (currentSuggestion.length() > partial.length())
@@ -239,14 +239,14 @@ void drawQuadrants() {
       text(("" + grp.charAt(activeLetIdx)).toUpperCase(), cx, cy + 28);
 
       // Show all letters small across the top of the quadrant, highlight active
-      textFont(fontSmall);
+      textFont(fontMed);
       float slotW = qw / n;
       for (int i = 0; i < n; i++) {
         float lx = x0 + slotW * i + slotW / 2.0;
         fill(i == activeLetIdx ? color(255,185,30) : color(200, 100));
         rect(x0 + slotW * i, y0, slotW, 3);
         fill(i == activeLetIdx ? color(255,185,30) : color(200, 140));
-        text(("" + grp.charAt(i)).toUpperCase(), lx, y0 + 14);
+        text(("" + grp.charAt(i)).toUpperCase(), lx, y0 + 20);
       }
 
     } else {
