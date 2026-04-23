@@ -114,11 +114,11 @@ void draw() {
 void drawTextArea() {
   textFont(fontScaffold);
   textAlign(LEFT);
-  fill(128);
-  text("Phrase " + (currTrialNum+1) + " of " + totalTrialNum, 70, 50);
-  fill(128);
-  text("Target:   " + currentPhrase, 70, 100);
-  text("Entered:  " + currentTyped + "|", 70, 140);
+  fill(30);
+  text("Phrase " + (currTrialNum+1) + " of " + totalTrialNum, 70, watchT - 66);
+  fill(30);
+  text("Target:   " + currentPhrase, 70, watchT - 44);
+  text("Entered:  " + currentTyped + "|", 70, watchT - 22);
 }
 
 // ── Four quadrants ────────────────────────────────────────────────────────────
