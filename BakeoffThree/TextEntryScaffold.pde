@@ -1,8 +1,6 @@
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Random;
-import java.util.ArrayList;
-import java.util.HashSet;
 
 // Set the DPI to make your smartwatch 1 inch square.
 final int DPIofYourDeviceScreen = 250;
@@ -11,6 +9,8 @@ final int DPIofYourDeviceScreen = 250;
 String[] phrases;
 String[] suggestions;
 String[] wordList;
+long[] wordFrequencies;
+int numStored = 15000;
 String currentSuggestion = "";
 float dragStartX = 0, dragStartY = 0;
 int totalTrialNum = 2;
@@ -57,15 +57,7 @@ void setup() {
   phrases = loadStrings("phrases2.txt");
   Collections.shuffle(Arrays.asList(phrases), new Random());
 
-  // Build word list from all phrases
-  HashSet<String> words = new HashSet<String>();
-  for (String p : phrases) {
-    for (String w : p.trim().toLowerCase().split("\\s+")) {
-      if (w.length() > 0) words.add(w);
-    }
-  }
-  wordList = words.toArray(new String[0]);
-  Arrays.sort(wordList);
+  loadWords();
   orientation(LANDSCAPE);
   size(800, 800);
 
@@ -140,19 +132,90 @@ void drawTextArea() {
   text("Entered:  " + currentTyped + "|", 70, watchT - 22);
 }
 
-// ── Autocomplete ─────────────────────────────────────────────────────────────
+// ── Recommender ──────────────────────────────────────────────────────────────
+void loadWords() {
+  String[] fcontents = loadStrings("ngrams/count_1w.txt");
+  wordList        = new String[numStored];
+  wordFrequencies = new long[numStored];
+  for (int i = 0; i < numStored; i++) {
+    String line = fcontents[i];
+    int tab = line.indexOf("\t");
+    wordList[i]        = line.substring(0, tab).toLowerCase();
+    wordFrequencies[i] = Long.parseLong(line.substring(tab + 1));
+  }
+  sortWords();
+}
+
+void sortWordsHelper(int start, int end) {
+  if (end - start < 2) return;
+  if (end - start == 2) {
+    if (wordList[start].compareTo(wordList[start + 1]) > 0) swaps(start, start + 1);
+    return;
+  }
+  int ip = start;
+  String pivotValue = wordList[ip];
+  swaps(ip, end - 1); ip = end - 1;
+  int il = start, ir = end - 2;
+  boolean l = false, r = false;
+  while (il < ir) {
+    if (!l) { if (wordList[il].compareTo(pivotValue) > 0) l = true; else il++; }
+    else if (!r) { if (wordList[ir].compareTo(pivotValue) < 0) r = true; else ir--; }
+    else { swaps(il, ir); l = false; r = false; }
+  }
+  if (wordList[il].compareTo(wordList[ip]) > 0) {
+    swaps(il, ip);
+    sortWordsHelper(start, il);
+    sortWordsHelper(il + 1, end);
+  } else {
+    sortWordsHelper(start, end - 1);
+  }
+}
+
+void sortWords() { sortWordsHelper(0, numStored); }
+
+void swapStringsInArray(String[] arr, int i1, int i2) {
+  String temp = arr[i1]; arr[i1] = arr[i2]; arr[i2] = temp;
+}
+void swapLongsInArray(long[] arr, int i1, int i2) {
+  long temp = arr[i1]; arr[i1] = arr[i2]; arr[i2] = temp;
+}
+void swaps(int i1, int i2) {
+  swapStringsInArray(wordList, i1, i2);
+  swapLongsInArray(wordFrequencies, i1, i2);
+}
+
+float similarityScore(String input, String word) {
+  float score = 1.0;
+  int iLen = input.length(), wLen = word.length();
+  if (iLen <= wLen && input.equals(word.substring(0, iLen))) {
+    score *= Math.pow(0.8, (wLen - iLen));
+  } else {
+    score *= 0.01 * Math.pow(0.3, computeLevenshteinDistance(input, word));
+  }
+  return score;
+}
+
+int matchScore(String input, String word, int index) {
+  return (int)(0.0001 * wordFrequencies[index] * similarityScore(input, word));
+}
+
+String topChoice(String input) {
+  String bestWord = "";
+  int bestScore = 0;
+  for (int i = 0; i < numStored; i++) {
+    if (input.equals(wordList[i])) continue;
+    int score = matchScore(input, wordList[i], i);
+    if (score > bestScore) { bestScore = score; bestWord = wordList[i]; }
+  }
+  return bestWord;
+}
+
 void updateSuggestion() {
-  // Get the last partial word being typed
-  String[] parts = currentTyped.split(" ", -1);
-  String partial = parts[parts.length - 1].toLowerCase();
+  int si = currentTyped.lastIndexOf(' ');
+  String partial = (si < 0 ? currentTyped : currentTyped.substring(si + 1)).toLowerCase();
   currentSuggestion = "";
   if (partial.length() < 2) return;
-  for (String w : wordList) {
-    if (w.startsWith(partial) && !w.equals(partial)) {
-      currentSuggestion = w;
-      break;
-    }
-  }
+  currentSuggestion = topChoice(partial);
 }
 
 void drawSuggestion() {
